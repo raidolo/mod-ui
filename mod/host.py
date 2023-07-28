@@ -1522,17 +1522,25 @@ class Host(object):
             cb_migi_pb_prgch(True)
 
     def start_session(self, callback):
+        # Setup MIDI program navigation fix 
+        self.profile.set_midi_prgch_channel("pedalboard", 1)
+        self.profile.set_midi_prgch_channel("snapshot", 2)
+
         midi_pb_prgch, midi_ss_prgch = self.profile.get_midi_prgch_channels()
         if midi_pb_prgch >= 1 and midi_pb_prgch <= 16:
-            self.send_notmodified("monitor_midi_program %d 0" % (midi_pb_prgch-1))
+            self.send_notmodified("monitor_midi_program %d 1" % (midi_pb_prgch-1))
+        if midi_ss_prgch >= 1 and midi_ss_prgch <= 16:
+            self.send_notmodified("monitor_midi_program %d 1" % (midi_ss_prgch-1))
 
         self.web_connected = True
         self.web_data_ready_counter = 0
         self.web_data_ready_ok = True
         self.send_output_data_ready(None, None)
 
-        self.alluserpedalboards = []
-        self.userbanks = []
+        # Setup MIDI program navigation fix 
+        userpedals, baduserbundles = get_all_good_and_bad_pedalboards(kPedalboardInfoUserOnly)
+        self.alluserpedalboards = userpedals
+        self.userbanks = list_banks(baduserbundles, True, False)
 
         if not self.hmi.initialized:
             callback(True)

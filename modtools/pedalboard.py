@@ -35,7 +35,7 @@ def resize_image(img):
         height = MAX_THUMB_HEIGHT
     # ANTIALIAS is deprecated and will be removed in Pillow 10 (2023-07-01).
     # Use Resampling.LANCZOS instead.
-    img.thumbnail((width, height), Image.ANTIALIAS)
+    img.thumbnail((width, height), Image.Resampling.LANCZOS)
 
 
 class Anchor(Enum):

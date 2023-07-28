@@ -1,3 +1,11 @@
+# Mod-UI forked for MOD Docker 2023
+This is a modified version of mod-ui that enables the change of the pedalboards and the snapshot using MIDI Program Change commands. 
+The Pedalboards can be changed using MIDI Channel 1, the Snapshots can be changed using MIDI Channel 2. 
+The values for the Program Change start at 0 (zero), so using for instance Channel 1 PC 0 it loads the first pedalboard in your library and so on... the pedalboards are ordered in a not so clear way in mod-ui, so it better if you call them like "001 - First song", "002 - Second song" and so on, this way you can keep them in the desired order.
+
+Little Bug: 
+Currently there is a bug in mod-ui, when you change the pedalboard via MIDI, the page refreshes, but the title on the top left keep the previous pedalboard name. If you refresh the mod-ui page then it updates correctly. I tried to fix it but i had no luck, sorry. 
+
 mod-ui
 ======
 

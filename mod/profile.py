@@ -119,6 +119,8 @@ class Profile(object):
 
     # 1-16 midi channel, 0 being off
     MIDI_CHANNEL_NAVIGATION_OFF = 0
+    MIDI_CHANNEL_NAVIGATION_PB = 1
+    MIDI_CHANNEL_NAVIGATION_SN = 2
 
     OUTPUT_MODE_HEADPHONE = 0
     OUTPUT_MODE_CV        = 1
@@ -134,8 +136,8 @@ class Profile(object):
         'inputMode': INPUT_MODE_CV,
         'inputStereoLink': True,
         'masterVolumeChannelMode': MASTER_VOLUME_CHANNEL_MODE_BOTH,
-        'midiChannelForPedalboardsNavigation': MIDI_CHANNEL_NAVIGATION_OFF,
-        'midiChannelForSnapshotsNavigation': MIDI_CHANNEL_NAVIGATION_OFF,
+        'midiChannelForPedalboardsNavigation': MIDI_CHANNEL_NAVIGATION_PB,
+        'midiChannelForSnapshotsNavigation': MIDI_CHANNEL_NAVIGATION_SN,
         'midiClockSend': False,
         'output1volume': 0.0, # 0dB
         'output2volume': 0.0,
