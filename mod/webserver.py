@@ -14,7 +14,6 @@ import time
 from base64 import b64decode, b64encode
 from datetime import timedelta
 from random import randint
-from signal import signal, SIGUSR1, SIGUSR2
 from tornado import gen, iostream, web, websocket
 from tornado.escape import squeeze, url_escape, xhtml_escape
 from tornado.ioloop import IOLoop
@@ -22,8 +21,14 @@ from tornado.template import Loader
 from tornado.util import unicode_type
 from uuid import uuid4
 
+try:
+    from signal import signal, SIGUSR1, SIGUSR2
+    haveSignal = True
+except ImportError:
+    haveSignal = False
+
 from mod.profile import Profile
-from mod.settings import (APP, LOG, DEV_API,
+from mod.settings import (DESKTOP, LOG, DEV_API,
                           HTML_DIR, DOWNLOAD_TMP_DIR, DEVICE_KEY, DEVICE_WEBSERVER_PORT,
                           CLOUD_HTTP_ADDRESS, CLOUD_LABS_HTTP_ADDRESS,
                           PLUGINS_HTTP_ADDRESS, PEDALBOARDS_HTTP_ADDRESS, CONTROLCHAIN_HTTP_ADDRESS,
@@ -36,9 +41,9 @@ from mod.settings import (APP, LOG, DEV_API,
                           DEV_HOST, UNTITLED_PEDALBOARD_NAME, MODEL_CPU, MODEL_TYPE, PEDALBOARDS_LABS_HTTP_ADDRESS)
 
 from mod import (
-    TextFileFlusher,
+    TextFileFlusher, WINDOWS,
     check_environment, jsoncall, safe_json_load,
-    get_hardware_descriptor, get_unique_name, symbolify,
+    get_hardware_descriptor, get_unique_name, os_sync, symbolify,
 )
 from mod.bank import list_banks, save_banks, remove_pedalboard_from_banks
 from mod.session import SESSION
@@ -66,6 +71,9 @@ class GlobalWebServerState(object):
 
 gState = GlobalWebServerState()
 gState.favorites = []
+
+def mod_squeeze(text):
+    return squeeze(text.replace("\\", "\\\\").replace("'", "\\'"))
 
 @gen.coroutine
 def install_bundles_in_tmp_dir(callback):
@@ -141,7 +149,7 @@ def install_bundles_in_tmp_dir(callback):
             'installed': installed,
         }
 
-    os.sync()
+    os_sync()
     callback(resp)
 
 def run_command(args, cwd, callback):
@@ -188,7 +196,7 @@ def restart_services(restartJACK2, restartUI):
 
 @gen.coroutine
 def start_restore():
-    os.sync()
+    os_sync()
     yield gen.Task(SESSION.hmi.restore, datatype='boolean')
 
 def _reset_get_all_pedalboards_cache_with_refresh_1():
@@ -597,12 +605,12 @@ class SystemExeChange(JsonRequestHandler):
                 yield gen.Task(run_command, ["systemctl", "stop", servicename], None)
 
         if not finished:
-            os.sync()
+            os_sync()
             self.write(True)
 
     @gen.coroutine
     def reboot(self):
-        os.sync()
+        os_sync()
         yield gen.Task(run_command, ["reboot"], None)
 
 class SystemCleanup(JsonRequestHandler):
@@ -652,7 +660,7 @@ class SystemCleanup(JsonRequestHandler):
             yield gen.Task(run_command, ["systemctl", "stop", "jack2"], None)
 
         yield gen.Task(run_command, ["rm", "-rf"] + stuffToDelete, None)
-        os.sync()
+        os_sync()
 
         self.write({
             'ok'   : True,
@@ -674,7 +682,7 @@ class UpdateDownload(MultiPartFileReceiver):
         run_command(['mv', src, dst], None, self.move_file_finished)
 
     def move_file_finished(self, resp):
-        os.sync()
+        os_sync()
         self.result = True
         self.sfr_callback()
 
@@ -752,6 +760,18 @@ class EffectList(JsonRequestHandler):
         self.write(data)
 
 class SDKEffectInstaller(EffectInstaller):
+    def set_default_headers(self):
+        if 'Origin' not in self.request.headers.keys():
+            return
+        origin = self.request.headers['Origin']
+        match  = re.match(r'^(\w+)://([^/]*)/?', origin)
+        if match is None:
+            return
+        protocol, domain = match.groups()
+        if protocol != "http" and not domain.endswith(":9000") and not domain.endswith(".mod.audio"):
+            return
+        self.set_header("Access-Control-Allow-Origin", origin)
+
     @web.asynchronous
     @gen.engine
     def post(self):
@@ -777,7 +797,7 @@ class SDKEffectUpdater(JsonRequestHandler):
         if match is None:
             return
         protocol, domain = match.groups()
-        if protocol != "http" or not domain.endswith(":9000"):
+        if protocol != "http" and not domain.endswith(":9000") and not domain.endswith(".mod.audio"):
             return
         self.set_header("Access-Control-Allow-Origin", origin)
 
@@ -1096,7 +1116,7 @@ class EffectPresetDelete(JsonRequestHandler):
             logging.exception(e)
         self.write(ok)
 
-class RemoteWebSocket(websocket.WebSocketHandler):
+class RemotePedalboardWebSocket(websocket.WebSocketHandler):
     def check_origin(self, origin):
         match = re.match(r'^(\w+)://([^/]*)/?', origin)
         if match is None:
@@ -1116,6 +1136,41 @@ class RemoteWebSocket(websocket.WebSocketHandler):
         SESSION.websockets[0].write_message("load-pb-remote " + pedalboard_id)
         self.write_message("true")
         self.close()
+
+class RemotePluginWebSocket(websocket.WebSocketHandler):
+    def check_origin(self, origin):
+        match = re.match(r'^(\w+)://([^/]*)/?', origin)
+        if match is None:
+            return False
+        protocol, domain = match.groups()
+        if protocol not in ("http", "https"):
+            return False
+        if domain != "mod.audio" and not domain.endswith(".mod.audio"):
+            return False
+        return True
+
+    @gen.coroutine
+    def on_message(self, package):
+        if not package:
+            hwdesc = get_hardware_descriptor()
+            self.write_message(json.dumps({
+                'bin-compat': hwdesc.get('bin-compat', "Unknown"),
+                'platform': hwdesc.get('platform', "Unknown"),
+                'version': IMAGE_VERSION,
+            }))
+            return
+
+        filename = os.path.join(DOWNLOAD_TMP_DIR, "remote.tar.gz")
+
+        with open(filename, 'wb') as fh:
+            fh.write(b64decode(package))
+
+        resp = yield gen.Task(install_package, filename)
+
+        if resp['ok']:
+            SESSION.msg_callback("rescan " + b64encode(json.dumps(resp).encode("utf-8")).decode("utf-8"))
+
+        self.write_message(json.dumps(resp))
 
 class ServerWebSocket(websocket.WebSocketHandler):
     @gen.coroutine
@@ -1544,6 +1599,7 @@ class PedalboardTransportSetSyncMode(JsonRequestHandler):
 class SnapshotSave(JsonRequestHandler):
     def post(self):
         ok = SESSION.host.snapshot_save()
+        SESSION.host.save_snapshots_to_disk()
         self.write(ok)
 
 class SnapshotSaveAs(JsonRequestHandler):
@@ -1556,6 +1612,7 @@ class SnapshotSaveAs(JsonRequestHandler):
 
         yield gen.Task(SESSION.host.hmi_report_ss_name_if_current, idx)
 
+        SESSION.host.save_snapshots_to_disk()
         self.write({
             'ok': idx is not None,
             'id': idx,
@@ -1575,6 +1632,7 @@ class SnapshotRename(JsonRequestHandler):
 
         yield gen.Task(SESSION.host.hmi_report_ss_name_if_current, idx)
 
+        SESSION.host.save_snapshots_to_disk()
         self.write({
             'ok': ok,
             'title': title,
@@ -1584,6 +1642,7 @@ class SnapshotRemove(JsonRequestHandler):
     def get(self):
         idx = int(self.get_argument('id'))
         ok  = SESSION.host.snapshot_remove(idx)
+        SESSION.host.save_snapshots_to_disk()
         self.write(ok)
 
 class SnapshotList(JsonRequestHandler):
@@ -1714,10 +1773,10 @@ class TemplateHandler(TimelessRequestHandler):
         user_id = safe_json_load(USER_ID_JSON_FILE, dict)
 
         with open(DEFAULT_ICON_TEMPLATE, 'r') as fh:
-            default_icon_template = squeeze(fh.read().replace("'", "\\'"))
+            default_icon_template = mod_squeeze(fh.read())
 
         with open(DEFAULT_SETTINGS_TEMPLATE, 'r') as fh:
-            default_settings_template = squeeze(fh.read().replace("'", "\\'"))
+            default_settings_template = mod_squeeze(fh.read())
 
         pbname = SESSION.host.pedalboard_name
         prname = SESSION.host.snapshot_name()
@@ -1731,7 +1790,7 @@ class TemplateHandler(TimelessRequestHandler):
         context = {
             'default_icon_template': default_icon_template,
             'default_settings_template': default_settings_template,
-            'default_pedalboard': DEFAULT_PEDALBOARD,
+            'default_pedalboard': mod_squeeze(DEFAULT_PEDALBOARD),
             'cloud_url': CLOUD_HTTP_ADDRESS,
             'cloud_labs_url': CLOUD_LABS_HTTP_ADDRESS,
             'plugins_url': PLUGINS_HTTP_ADDRESS,
@@ -1745,17 +1804,17 @@ class TemplateHandler(TimelessRequestHandler):
             'factory_pedalboards': hwdesc.get('factory_pedalboards', False),
             'platform': hwdesc.get('platform', "Unknown"),
             'addressing_pages': int(hwdesc.get('addressing_pages', 0)),
-            'lv2_plugin_dir': LV2_PLUGIN_DIR,
-            'bundlepath': SESSION.host.pedalboard_path,
-            'title':  squeeze(pbname.replace("'", "\\'")),
+            'lv2_plugin_dir': mod_squeeze(LV2_PLUGIN_DIR),
+            'bundlepath': mod_squeeze(SESSION.host.pedalboard_path),
+            'title':  mod_squeeze(pbname),
             'size': json.dumps(SESSION.host.pedalboard_size),
             'fulltitle':  xhtml_escape(fullpbname),
             'titleblend': '' if SESSION.host.pedalboard_name else 'blend',
             'dev_api_class': 'dev_api' if DEV_API else '',
-            'using_app': 'true' if APP else 'false',
-            'using_mod': 'true' if DEVICE_KEY or DEV_HOST else 'false',
-            'user_name': squeeze(user_id.get("name", "").replace("'", "\\'")),
-            'user_email': squeeze(user_id.get("email", "").replace("'", "\\'")),
+            'using_desktop': 'true' if DESKTOP else 'false',
+            'using_mod': 'true' if DEVICE_KEY and hwdesc.get('platform', None) is not None else 'false',
+            'user_name': mod_squeeze(user_id.get("name", "")),
+            'user_email': mod_squeeze(user_id.get("email", "")),
             'favorites': json.dumps(gState.favorites),
             'preferences': json.dumps(SESSION.prefs.prefs),
             'bufferSize': get_jack_buffer_size(),
@@ -1767,10 +1826,10 @@ class TemplateHandler(TimelessRequestHandler):
         bundlepath = self.get_argument('bundlepath')
 
         with open(DEFAULT_ICON_TEMPLATE, 'r') as fh:
-            default_icon_template = squeeze(fh.read().replace("'", "\\'"))
+            default_icon_template = mod_squeeze(fh.read())
 
         with open(DEFAULT_SETTINGS_TEMPLATE, 'r') as fh:
-            default_settings_template = squeeze(fh.read().replace("'", "\\'"))
+            default_settings_template = mod_squeeze(fh.read())
 
         try:
             pedalboard = get_pedalboard_info(bundlepath)
@@ -1832,7 +1891,7 @@ class BulkTemplateLoader(TimelessRequestHandler):
                 contents = fh.read()
             self.write("TEMPLATES['%s'] = '%s';\n\n"
                        % (template[:-5],
-                          squeeze(contents.replace("'", "\\'"))
+                          mod_squeeze(contents)
                           )
                        )
         self.finish()
@@ -1894,7 +1953,7 @@ class SetBufferSize(JsonRequestHandler):
             elif os.path.exists(USING_256_FRAMES_FILE):
                 os.remove(USING_256_FRAMES_FILE)
 
-            os.sync()
+            os_sync()
 
         newsize = set_jack_buffer_size(size)
         self.write({
@@ -1918,11 +1977,14 @@ class SwitchCpuFreq(JsonRequestHandler):
         index = freqs.index(cur_freq) + 1
         if index >= len(freqs):
             index = 0
+        next_freq = freqs[index]
+        if cur_freq == next_freq:
+            return self.write(True)
         with open("/sys/devices/system/cpu/online", 'r') as fh:
             num_start, num_end = tuple(int(i) for i in fh.read().strip().split("-"))
         for num in range(num_start, num_end+1):
             with open("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_setspeed" % num, 'w') as fh:
-                fh.write(freqs[index])
+                fh.write(next_freq)
         self.write(True)
 
 class SaveSingleConfigValue(JsonRequestHandler):
@@ -2077,7 +2139,7 @@ class TokensDelete(JsonRequestHandler):
 
         if os.path.exists(tokensConf):
             os.remove(tokensConf)
-            os.sync()
+            os_sync()
 
         self.write(True)
 
@@ -2324,7 +2386,8 @@ application = web.Application(
             (r"/js/templates.js$", BulkTemplateLoader),
 
             (r"/websocket/?$", ServerWebSocket),
-            (r"/rpbsocket/?$", RemoteWebSocket),
+            (r"/rpbsocket/?$", RemotePedalboardWebSocket),
+            (r"/rplsocket/?$", RemotePluginWebSocket),
 
             (r"/(.*)", TimelessStaticFileHandler, {"path": HTML_DIR}),
         ],
@@ -2351,7 +2414,7 @@ def signal_boot_check():
     run_command(["hmi-reset"], None, signal_boot_check_step2)
 
 def signal_boot_check_step2(r):
-    os.sync()
+    os_sync()
     run_command(["reboot"], None, None)
 
 def signal_upgrade_check():
@@ -2403,12 +2466,12 @@ def prepare(isModApp = False):
         get_all_plugins()
         print("Done!")
 
-    if not isModApp:
+    if haveSignal and not isModApp:
         signal(SIGUSR1, signal_recv)
         signal(SIGUSR2, signal_recv)
         set_process_name("mod-ui")
 
-    application.listen(DEVICE_WEBSERVER_PORT, address="0.0.0.0")
+    application.listen(DEVICE_WEBSERVER_PORT, address=("127.0.0.1" if DESKTOP else "0.0.0.0"))
 
     def checkhost():
         if SESSION.host.readsock is None or SESSION.host.writesock is None:

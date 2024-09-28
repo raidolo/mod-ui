@@ -12,7 +12,7 @@ DEV_HOST = bool(int(os.environ.get('MOD_DEV_HOST', DEV_ENVIRONMENT)))
 # If on, use dev cloud API environment
 DEV_API = bool(int(os.environ.get('MOD_DEV_API', False)))
 
-APP = bool(int(os.environ.get('MOD_APP', False)))
+DESKTOP = bool(int(os.environ.get('MOD_DESKTOP', False)))
 LOG = int(os.environ.get('MOD_LOG', 0))
 
 API_KEY = os.environ.pop('MOD_API_KEY', None)
@@ -49,9 +49,9 @@ os.environ['MOD_KEYS_PATH'] = KEYS_PATH
 DOWNLOAD_TMP_DIR = os.environ.get('MOD_DOWNLOAD_TMP_DIR', '/tmp/mod-ui')
 PEDALBOARD_TMP_DIR = os.environ.get('MOD_PEDALBOARD_TMP_DIR', join(DATA_DIR, 'pedalboard-tmp-data'))
 
-LV2_PLUGIN_DIR = os.path.expanduser("~/.lv2/")
-LV2_PEDALBOARDS_DIR = os.environ.get('MOD_USER_PEDALBOARDS_DIR', os.path.expanduser("~/.pedalboards/"))
-LV2_FACTORY_PEDALBOARDS_DIR = os.environ.get('MOD_FACTORY_PEDALBOARDS_DIR', "/usr/share/mod/pedalboards/")
+LV2_PLUGIN_DIR = os.environ.get('MOD_USER_PLUGINS_DIR', os.path.expanduser("~/.lv2"))
+LV2_PEDALBOARDS_DIR = os.environ.get('MOD_USER_PEDALBOARDS_DIR', os.path.expanduser("~/.pedalboards"))
+LV2_FACTORY_PEDALBOARDS_DIR = os.environ.get('MOD_FACTORY_PEDALBOARDS_DIR', "/usr/share/mod/pedalboards")
 
 HMI_BAUD_RATE = os.environ.get('MOD_HMI_BAUD_RATE', 10000000)
 HMI_SERIAL_PORT = os.environ.get('MOD_HMI_SERIAL_PORT', "/dev/ttyUSB0")
@@ -61,6 +61,7 @@ MODEL_CPU = os.environ.get('MOD_MODEL_CPU', None)
 MODEL_TYPE = os.environ.get('MOD_MODEL_TYPE', None)
 
 DEVICE_WEBSERVER_PORT = int(os.environ.get('MOD_DEVICE_WEBSERVER_PORT', 80))
+DEVICE_HOST_PORT = int(os.environ.get('MOD_DEVICE_HOST_PORT', 5555))
 
 HTML_DIR = os.environ.get('MOD_HTML_DIR', join(sys.prefix, 'share/mod/html/'))
 DEFAULT_PEDALBOARD_COPY = os.environ.pop('MOD_DEFAULT_PEDALBOARD', join(sys.prefix, 'share/mod/default.pedalboard'))
@@ -74,13 +75,13 @@ DEFAULT_ICON_IMAGE = {
 }
 
 # Cloud API addresses
-CLOUD_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_HTTP_ADDRESS', "https://api-dev.mod.audio/v2")
+CLOUD_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_HTTP_ADDRESS', "https://api.mod.audio/v2")
 CLOUD_LABS_HTTP_ADDRESS = os.environ.pop('MOD_CLOUD_LABS_HTTP_ADDRESS', "https://api-labs.mod.audio/v2")
 PLUGINS_HTTP_ADDRESS = os.environ.pop('MOD_PLUGINS_HTTP_ADDRESS', "https://pedalboards.mod.audio/plugins")
-PEDALBOARDS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_HTTP_ADDRESS', "https://pedalboards-dev.mod.audio")
+PEDALBOARDS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_HTTP_ADDRESS', "https://pedalboards.mod.audio")
 PEDALBOARDS_LABS_HTTP_ADDRESS = os.environ.pop('MOD_PEDALBOARDS_LABS_HTTP_ADDRESS', "https://pedalboards-labs.mod.audio")
 CONTROLCHAIN_HTTP_ADDRESS = os.environ.pop('MOD_CONTROLCHAIN_HTTP_ADDRESS',
-                                           "https://download.mod.audio/releases/cc-firmware/v2")
+                                           "https://download.mod.audio/releases/cc-firmware/v3")
 
 MIDI_BEAT_CLOCK_SENDER_URI = "urn:mod:mclk"
 MIDI_BEAT_CLOCK_SENDER_INSTANCE_ID = 9993
